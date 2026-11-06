@@ -1,0 +1,18 @@
+rules_version = '2';
+
+// Kosh is a one-person app: only the owner's verified Google account can read or write,
+// and only under their own users/{uid} tree. Keep OWNER_EMAIL in functions/index.js in sync.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isOwner(uid) {
+      return request.auth != null
+        && request.auth.uid == uid
+        && request.auth.token.email == 'sudhanyak357@gmail.com'
+        && request.auth.token.email_verified == true;
+    }
+
+    match /users/{uid}/{document=**} {
+      allow read, write: if isOwner(uid);
+    }
+  }
+}
