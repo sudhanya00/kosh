@@ -1,61 +1,133 @@
 # Kosh
 
-Your "YOUR MONEY SYSTEM" spreadsheet, turned into a private web app for phone and laptop.
+**A private, AI-assisted money tracker.** Kosh started as my own budgeting
+spreadsheet and is now an installable web app I use every day: share a UPI
+payment or bank SMS to it and it is logged, categorised and counted against
+the month's budget, and an agent answers questions over the full history.
 
-**Live:** https://kosh-7d33a0.web.app (Firebase project `kosh-7d33a0`, data in Mumbai `asia-south1`)
+![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white)
+![Firebase](https://img.shields.io/badge/Firebase-Auth%20%7C%20Firestore%20%7C%20Functions%20%7C%20Hosting-FFCA28?logo=firebase&logoColor=black)
+![Gemini](https://img.shields.io/badge/Gemini-Vertex%20AI-4285F4?logo=google&logoColor=white)
 
-## What's in it
+Kosh is a single-user app by design: sign-in is restricted to the owner's
+Google account, enforced in both the Firestore rules and the Cloud Function.
+To run your own copy, see [Run your own](#run-your-own).
 
-| Spreadsheet sheet | In the app |
+## What it does
+
+- **Log by sharing.** On Android, tap Share on a payment in GPay, PhonePe or
+  Paytm, or share a bank SMS, and pick Kosh. It reads the payment, logs it
+  marked *to review*, and skips anything already logged (same UPI reference).
+- **Log by typing.** Write it like a text message ("dinner 2k on axis card
+  split with Rahul and Priya"), paste an SMS, or attach up to five
+  screenshots. Rows are shown for review before they save.
+- **Ask Kosh.** A Gemini agent with tools over the full history: find
+  transactions, exact totals grouped by month, category, merchant, account or
+  friend, balances on any date, budgets, bills, and finance formulas such as
+  months to a goal or loan payoff. It can also search by meaning across
+  merchants, notes and past chats.
+- **It learns.** Change a payment's category and that merchant keeps it from
+  then on. People are remembered as family or friends, and plain-English
+  rules ("payments from this person are family support") are followed by the
+  AI. Everything learned can be edited or deleted.
+- **Budgets, bills and goals.** Per-category limits, bills that tick off for
+  the month when marked paid, reserve goals and a payday checklist.
+- **Months run payday to payday.** A salary logged on the 30th starts the
+  next month. Calendar months are available as a setting.
+- **Splitting with friends.** The full bill leaves your account but only your
+  share counts as spending. The rest is tracked as one running total per
+  friend, and repayments settle it instead of counting as income.
+- **Private on screen.** Amounts are hidden every time the app opens, AI
+  answers included, until you reveal them.
+- **Works offline.** Entries made offline sync when the connection returns.
+
+## Engineering notes
+
+- **Every number comes from a tool, not the model.** The agent
+  (`functions/agent.js`) can call `find_transactions`, `summarize`,
+  `pay_cycles`, `balances`, `budget`, `bills`, `calculate`, `finance` and
+  `search_memory`, for up to six rounds per question. Totals and dates are
+  computed in code; the model only decides what to ask for and how to explain
+  the result.
+- **One implementation of the maths.** The tool logic lives in
+  `web/src/tools.ts` and is bundled, together with the app's own model and
+  calculation modules, into the Cloud Function at deploy time. The app and
+  the server cannot disagree about a balance.
+- **Memory that stays bounded.** Conversations are saved; the last eight
+  messages go to the model verbatim and older ones are folded into a rolling
+  summary. Each exchange is embedded with a multilingual embedding model and
+  stored for Firestore vector search.
+- **No API keys anywhere.** The function calls Gemini on Vertex AI as a
+  dedicated service account that holds only the roles it needs. It uses a
+  regional endpoint and falls back to the global one when that is busy.
+- **Android share target.** The PWA manifest registers a `share_target`, and
+  the service worker receives shared text and images, so Kosh appears in the
+  system share sheet without a native app.
+- **Locked down by default.** Firestore rules allow reads and writes only
+  under the owner's own `users/{uid}` tree, and only for a verified Google
+  account. The function checks the same thing before doing any work.
+
+## Stack
+
+| Concern | Choice |
 |---|---|
-| Start Here | Accounts → "How to log money", plus the AI follows the same rules |
-| Dashboard | Home: left-to-spend, income/spent/saved, balances, reserve goals, payday checklist |
-| Transactions | Activity (search, filters, edit, delete with undo) and the **+** button |
-| Monthly Budget | Plan → Budget (tap a limit to edit it) |
-| Bills & Subs | Plan → Bills ("Mark paid" logs the payment and ticks it off for the month) |
-| Accounts & Goals | Accounts: opening balances, goals, savings target, CSV export |
+| App | React 19, TypeScript, Vite, installable PWA |
+| Data | Firestore with offline persistence across tabs |
+| Auth | Firebase Auth (Google sign-in) |
+| Server | Cloud Functions for Firebase |
+| AI | Gemini on Vertex AI, Firestore vector search for recall |
+| Hosting | Firebase Hosting |
 
-AI (Gemini `gemini-3.5-flash` on **Vertex AI** in Mumbai, falling back to the global endpoint when busy, billed to the reelforge GCP project `reelforge-509712` so your Cloud credits pay; no API keys anywhere. The Cloud Function runs as `kosh-ai@kosh-7d33a0.iam.gserviceaccount.com`, which only has *Vertex AI User* on that project. Logic lives in `functions/kosh-ai.js`):
-- **Share to Kosh (Android):** in GPay/PhonePe/Paytm tap Share on a payment → Kosh. Or share a bank SMS. Kosh reads it, logs it immediately marked **to review**, and skips anything already logged (same UPI reference). Check them from the *To review* card on Home.
-- **+ → type it like a text message**, paste an SMS, or attach up to 5 screenshots. You review rows before they save.
-- **Ask Kosh** (and **Kosh's read** on Home): a Gemini agent with tools over your *full* history — find transactions, exact totals grouped by month/category/merchant/account/friend, pay-cycle dates, balances on any date, budgets, bills, a safe calculator and finance formulas (months to goal, EMI, loan payoff, savings rate), plus **search by meaning** across merchants, notes and past chats (Firestore vector search, `text-multilingual-embedding-002`). Every number comes from a tool, not the model's head. Conversations are saved (`users/{uid}/chats`); the last 8 messages go in verbatim and older ones are folded into a rolling summary. Tell it a goal or who someone is and it saves that to Teach Kosh / Kosh remembers.
-- **Kosh remembers** (Accounts): change a payment's category and that merchant keeps it from then on (with an offer to fix earlier ones). Confirm a payment from family and that person is remembered as family; anyone you split with is remembered as a friend. Every learned person (with relation, e.g. "Mother") and merchant rule can be edited or deleted there, or added by hand.
-- **Teach Kosh** (Accounts): plain-English rules the AI follows ("Payments from Rakesh Khajuria are from Dad → Family support").
+## Repository layout
 
-Also:
-- **Accounts and cards are yours to manage:** add, rename (history follows), archive. Cards have limits and show how much you're using (green under 30%). "How it shows in UPI apps" (bank name, last 4 digits, UPI ID) helps the AI match screenshots to the right account.
-- **Months run payday to payday** by default: a salary logged on 30 Oct starts "November". Until it's logged, the "usual payday" setting stands in (shown with *). You can switch to calendar months in Accounts.
-- **Paying for friends:** on any expense tap **Split with friends** (split evenly or custom amounts). The full bill leaves your account, but only your share counts as spending; the rest shows under **Friends owe you** on Home, one running total per friend (like Splitwise). Share their UPI payment back to Kosh and it's logged as a **Friend repayment** (not income), settling their total. Partial and combined paybacks work. **Write off** turns an unpaid share into your own spending. You can also just type "dinner 20k on axis card split with Rahul, Priya, Amit, Neha".
-- **Amounts hidden by default:** every open shows ₹•••• (AI answers too; editable amount boxes are blurred until tapped). The eye button next to the profile icon reveals them; leaving the app hides them again.
-- **Income types:** Salary, Side income, Family support, Gifts received, Interest & dividends, Refunds & cashback, Other income.
+| Path | What |
+|---|---|
+| `web/src/screens/` | Home, Activity, Plan, Accounts, Ask, Login |
+| `web/src/model.ts`, `calc.ts`, `memory.ts` | Data model, pay-cycle and balance maths, learned rules |
+| `web/src/tools.ts` | The agent's tools, shared with the server |
+| `web/src/share.tsx`, `web/public/sw.js` | Android share target |
+| `functions/agent.js` | The Ask Kosh agent loop, chat memory and recall |
+| `functions/kosh-ai.js` | Parsing payments, SMS and screenshots |
+| `firestore.rules` | Owner-only access |
 
-Only `sudhanyak357@gmail.com` (Google sign-in) can read or write anything. This is enforced in `firestore.rules` and in `functions/index.js`.
+## Run your own
 
-## Install on your phone
+Kosh needs a Firebase project on the Blaze plan with Google sign-in,
+Firestore and Cloud Functions enabled, and a Google Cloud project with
+Vertex AI.
 
-On Android open the live link in **Chrome → ⋮ → Install app** (or *Add to Home screen → Install*). It opens full-screen like an app and appears in the share menu as **Kosh** (it can take a minute to show up after installing). Entries made offline sync when you're back online, and shares made offline wait on Home until there's a connection.
+1. Set the owner email in `firestore.rules` and `functions/index.js`.
+2. Point `.firebaserc` at your project, and set `VERTEX_PROJECT` (and
+   optionally `GEMINI_MODEL`) in `functions/.env`.
+3. Grant the function's service account *Vertex AI User* on the Vertex
+   project.
 
-## Setup (done)
-
-- Google sign-in enabled, project on Blaze, Firestore in `asia-south1`, function `ai` deployed in `asia-south1`.
-- Old build images are deleted after 7 days, so Artifact Registry doesn't slowly bill you.
-- To stop Kosh using reelforge's credits, remove `kosh-ai@…` from IAM on `reelforge-509712`.
-- To bill a different project: set `VERTEX_PROJECT` in `functions/.env`, grant `kosh-ai` *Vertex AI User* there, then run `firebase deploy --only functions`.
-
-## How Ask Kosh is built
-
-`web/src/tools.ts` holds the tool maths and is bundled with the app's own `model`/`calc`/`memory` into `functions/lib/core.js` (`npm --prefix functions run build`, run automatically before every functions deploy), so the server and the app can't disagree. `functions/agent.js` loads your data with the Admin SDK (cached 30s), runs up to 6 tool rounds, saves both turns, embeds the Q&A into `users/{uid}/recall`, and folds old turns into the chat summary. The `kosh-ai` service account has *Cloud Datastore User* on `kosh-7d33a0` for this.
-
-## Develop locally
+Install dependencies:
 
 ```bash
 cd functions && npm install && cd ../web && npm install
-NODE_OPTIONS=--dns-result-order=ipv4first firebase emulators:start --only auth,firestore,functions   # repo root; IPv4 avoids hangs to Vertex on this PC
-npm --prefix web run dev -- --mode emulators               # http://localhost:5173
 ```
 
-In emulator mode, sign in from the browser console with `__devSignIn("sudhanyak357@gmail.com", "Your Name")`. The local function calls Vertex with your `gcloud auth application-default login` credentials.
+Run against the local emulators (from the repository root), then start the
+app:
 
-Deploy the site: `npm --prefix web run build && firebase deploy --only hosting,firestore:rules`.
+```bash
+firebase emulators:start --only auth,firestore,functions
+```
 
-To change the model, set `GEMINI_MODEL` in `functions/.env`.
+```bash
+npm --prefix web run dev -- --mode emulators
+```
+
+Open http://localhost:5173. In emulator mode, sign in from the browser
+console with `__devSignIn("you@example.com", "Your Name")`. The local
+function calls Vertex AI with your `gcloud auth application-default login`
+credentials.
+
+Deploy:
+
+```bash
+npm --prefix web run build && firebase deploy
+```
